@@ -1,0 +1,602 @@
+<route lang="yaml">
+meta:
+  activeMenu: /datasources
+</route>
+
+<script setup lang="ts">
+import { nextTick, onMounted, ref, computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ElMessage, ElMessageBox } from "element-plus";
+import type { InputInstance } from "element-plus";
+import { Plus, Search, Refresh, MoreFilled, CopyDocument } from "@element-plus/icons-vue";
+import { useI18n } from "vue-i18n";
+import { copyToClipboard } from "~/utils/clipboard";
+import { listTableInfos, getAddedTableNames, batchAddTables, syncColumns, deleteTable, updateTable, type TableInfoVO } from "~/api/tableinfo.ts";
+import { getSchemas, getTables, getDataSource, type TableVO } from "~/api/datasource.ts";
+import { notifyError } from "~/api/http";
+import { formatDateTime } from "~/composables";
+
+const { t } = useI18n();
+
+const router = useRouter();
+const route = useRoute("/datasources/[id]/tables/");
+
+const datasourceId = ref(route.params.id);
+const searchKeyword = ref("");
+
+const loading = ref(false);
+const tableList = ref<TableInfoVO[]>([]);
+const page = ref(1);
+const pageSize = ref(10);
+const total = ref(0);
+
+const metadataDialogVisible = ref(false);
+const currentTable = ref<TableInfoVO | null>(null);
+
+// 添加表弹窗相关
+const addTableDialogVisible = ref(false);
+const schemas = ref<string[]>([]);
+const selectedSchema = ref("");
+const defaultSchema = ref("");
+const availableTables = ref<TableVO[]>([]);
+const selectedTables = ref<string[]>([]);
+const addedTableNames = ref<string[]>([]);
+const schemaLoading = ref(false);
+const tablesLoading = ref(false);
+const addTableLoading = ref(false);
+
+// Transfer 组件数据
+interface TransferItem {
+  key: string;
+  label: string;
+  comment?: string;
+  disabled: boolean;
+}
+
+const transferData = computed<TransferItem[]>(() => {
+  return availableTables.value.map(table => ({
+    key: table.name,
+    label: table.name,
+    comment: table.comment,
+    disabled: addedTableNames.value.includes(table.name),
+  }));
+});
+
+const filterTableMethod = (query: string, item: TransferItem) => {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (
+    item.label.toLowerCase().includes(q) ||
+    Boolean(item.comment && item.comment.toLowerCase().includes(q))
+  );
+};
+
+// 加载表列表
+const loadTables = async () => {
+  try {
+    loading.value = true;
+    const response = await listTableInfos(
+      datasourceId.value,
+      page.value,
+      pageSize.value,
+      searchKeyword.value,
+    );
+    tableList.value = response.data || [];
+    total.value = response.total ?? 0;
+  } catch (error) {
+    console.error("Failed to load table list:", error);
+    ElMessage.error(t("common.loadFailed"));
+  } finally {
+    loading.value = false;
+  }
+};
+
+const handleSearch = () => {
+  page.value = 1;
+  loadTables();
+};
+
+const handleClearSearch = () => {
+  searchKeyword.value = "";
+  page.value = 1;
+  loadTables();
+};
+
+const handleRefresh = () => {
+  searchKeyword.value = "";
+  page.value = 1;
+  loadTables();
+};
+
+const handleOpenAddTableDialog = async () => {
+  addTableDialogVisible.value = true;
+  selectedSchema.value = "";
+  availableTables.value = [];
+  selectedTables.value = [];
+
+  try {
+    schemaLoading.value = true;
+    schemas.value = await getSchemas(datasourceId.value);
+    addedTableNames.value = await getAddedTableNames(datasourceId.value);
+
+    // 自动选中数据源的默认 Schema
+    if (defaultSchema.value && schemas.value.includes(defaultSchema.value)) {
+      selectedSchema.value = defaultSchema.value;
+      await handleSchemaChange(defaultSchema.value);
+    }
+  } catch (error) {
+    console.error("Failed to load schema list:", error);
+    notifyError(error, t("common.loadFailed"));
+  } finally {
+    schemaLoading.value = false;
+  }
+};
+
+const handleSchemaChange = async (schema: string) => {
+  if (!schema) {
+    availableTables.value = [];
+    return;
+  }
+
+  try {
+    tablesLoading.value = true;
+    availableTables.value = await getTables(datasourceId.value, schema);
+    selectedTables.value = [];
+  } catch (error) {
+    console.error("Failed to load table list:", error);
+    notifyError(error, t("common.loadFailed"));
+  } finally {
+    tablesLoading.value = false;
+  }
+};
+
+const handleBatchAdd = async () => {
+  if (selectedTables.value.length === 0) {
+    ElMessage.warning(t("tableInfo.selectAtLeastOne"));
+    return;
+  }
+
+  try {
+    addTableLoading.value = true;
+    const tables = selectedTables.value.map(name => ({ name, schema: selectedSchema.value }));
+    await batchAddTables(datasourceId.value, tables);
+    ElMessage.success(t("tableInfo.addSuccess"));
+    addTableDialogVisible.value = false;
+    await loadTables();
+  } catch (error) {
+    console.error("Failed to add tables in batch:", error);
+    notifyError(error, t("tableInfo.addFailed"));
+  } finally {
+    addTableLoading.value = false;
+  }
+};
+
+const handleSyncColumns = async (table: TableInfoVO) => {
+  syncDialogVisible.value = true;
+  syncDialogTable.value = table;
+};
+
+const syncDialogVisible = ref(false);
+const syncDialogTable = ref<TableInfoVO | null>(null);
+const syncDialogOverwrite = ref(true);
+
+const confirmSyncColumns = async () => {
+  if (!syncDialogTable.value) return;
+  try {
+    await syncColumns(datasourceId.value, syncDialogTable.value.id, syncDialogOverwrite.value);
+    ElMessage.success(t("tableInfo.syncSuccess"));
+    syncDialogVisible.value = false;
+  } catch (error) {
+    console.error("Failed to sync column info:", error);
+    notifyError(error, t("tableInfo.syncFailed"));
+  }
+};
+
+const handleRemoveTable = async (table: TableInfoVO) => {
+  try {
+    await ElMessageBox.confirm(
+      t("tableInfo.removeConfirm", { name: table.name }),
+      t("common.warning"),
+      {
+        confirmButtonText: t("common.confirm"),
+        cancelButtonText: t("common.cancel"),
+        type: "warning",
+      }
+    );
+    await deleteTable(datasourceId.value, table.id);
+    ElMessage.success(t("tableInfo.removeSuccess"));
+    await loadTables();
+  } catch (error) {
+    if (error !== "cancel") {
+      console.error("Failed to delete table:", error);
+      ElMessage.error(t("tableInfo.removeFailed"));
+    }
+  }
+};
+
+// 配置元数据
+const handleConfigMetadata = (table: TableInfoVO) => {
+  currentTable.value = { ...table, aliases: table.aliases || [] };
+  metadataDialogVisible.value = true;
+};
+
+// 别名管理
+const newAlias = ref('');
+const newAliasInputVisible = ref(false);
+const newAliasInputRef = ref<InputInstance>();
+
+const handleNewAliasConfirm = () => {
+  if (!currentTable.value || !newAlias.value.trim()) return;
+  if (!currentTable.value.aliases) {
+    currentTable.value.aliases = [];
+  }
+  if (!currentTable.value.aliases.includes(newAlias.value.trim())) {
+    currentTable.value.aliases.push(newAlias.value.trim());
+  }
+  newAliasInputVisible.value = false;
+  newAlias.value = '';
+};
+
+const showNewAliasInput = () => {
+  newAliasInputVisible.value = true;
+  nextTick(() => {
+    newAliasInputRef.value?.focus();
+  });
+};
+
+const removeAlias = (alias: string) => {
+  if (!currentTable.value?.aliases) return;
+  currentTable.value.aliases = currentTable.value.aliases.filter(a => a !== alias);
+};
+
+const handleColumnManage = (table: TableInfoVO) => {
+  router.push({
+    path: `/datasources/${table.datasource_id}/tables/${table.id}/columns`,
+  });
+};
+
+const handleCopyTableName = async (name: string) => {
+  const success = await copyToClipboard(name);
+  if (success) {
+    ElMessage.success(t("common.copySuccess"));
+  } else {
+    ElMessage.error(t("common.copyFailed"));
+  }
+};
+
+// 保存元数据配置
+const handleSaveMetadata = async () => {
+  try {
+    await updateTable(datasourceId.value, currentTable.value!.id!, currentTable.value!);
+    ElMessage.success(t("common.saveSuccess"));
+    metadataDialogVisible.value = false;
+    await loadTables();
+  } catch (error) {
+    console.error("Failed to save metadata:", error);
+    ElMessage.error(t("common.operationFailed"));
+  }
+};
+
+// 分页事件
+const handlePageChange = (p: number) => {
+  page.value = p;
+  loadTables();
+};
+
+const handlePageSizeChange = (ps: number) => {
+  pageSize.value = ps;
+  page.value = 1;
+  loadTables();
+};
+
+onMounted(async () => {
+  try {
+    const ds = await getDataSource(datasourceId.value);
+    if (ds.default_schema) {
+      defaultSchema.value = ds.default_schema;
+    }
+  } catch { /* ignore */ }
+  loadTables();
+});
+</script>
+
+<template>
+  <div class="list-page">
+    <div class="detail-header flex items-start justify-between gap-4">
+      <el-breadcrumb separator="/">
+        <el-breadcrumb-item :to="{ path: '/datasources' }">
+          {{ t("layout.side.dataSources") }}
+        </el-breadcrumb-item>
+        <el-breadcrumb-item>{{
+          t("tableInfo.title")
+        }}</el-breadcrumb-item>
+      </el-breadcrumb>
+
+      <div class="detail-actions flex items-center gap-2">
+        <el-button :icon="Refresh" :loading="loading" @click="handleRefresh">
+          {{ t("common.refresh") }}
+        </el-button>
+        <el-button type="primary" :icon="Plus" @click="handleOpenAddTableDialog">
+          {{ t("tableInfo.addTable") }}
+        </el-button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-fields">
+        <el-input
+          v-model="searchKeyword"
+          :placeholder="t('datasource.searchPlaceholder')"
+          clearable
+          class="toolbar-search"
+          @keyup.enter="handleSearch"
+          @clear="handleClearSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-button type="primary" plain :icon="Search" @click="handleSearch">
+          {{ t("common.search") }}
+        </el-button>
+      </div>
+    </div>
+
+    <DataTableShell
+      :loading="loading"
+      :total="total"
+      :page="page"
+      :page-size="pageSize"
+      @page-change="handlePageChange"
+      @page-size-change="handlePageSizeChange"
+    >
+      <el-table :data="tableList" stripe style="width: 100%">
+        <el-table-column
+          prop="name"
+          :label="t('common.tableName')"
+          min-width="180"
+          show-overflow-tooltip
+        >
+          <template #default="{ row }">
+            <div class="group inline-flex items-center gap-1.5 max-w-full">
+              <el-button
+                link
+                type="primary"
+                class="!p-0 font-medium truncate"
+                @click="handleColumnManage(row)"
+              >
+                {{ row.name }}
+              </el-button>
+              <el-tooltip :content="t('common.copy')" placement="top" :show-after="300">
+                <el-button
+                  link
+                  :icon="CopyDocument"
+                  class="opacity-0 group-hover:opacity-100 transition-opacity !p-0.5 text-[var(--ep-text-color-placeholder)] hover:!text-[var(--ep-color-primary)] cursor-pointer shrink-0"
+                  :aria-label="t('common.copy')"
+                  @click.stop="handleCopyTableName(row.name)"
+                />
+              </el-tooltip>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('common.aliases')"
+          min-width="180"
+        >
+          <template #default="{ row }">
+            <el-tag
+              v-for="alias in row.aliases"
+              :key="alias"
+              size="small"
+              class="mr-1"
+            >
+              {{ alias }}
+            </el-tag>
+            <span v-if="!row.aliases?.length" class="text-[var(--ep-text-color-placeholder)]">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column
+          prop="description"
+          :label="t('common.description')"
+          min-width="150"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="schema"
+          :label="t('common.schema')"
+          min-width="120"
+        />
+        <el-table-column
+          prop="updated_at"
+          :label="t('common.updatedAt')"
+          min-width="140"
+        >
+          <template #default="{ row }">
+            {{ formatDateTime(row.updated_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column
+          :label="t('common.actions')"
+          width="160"
+          fixed="right"
+          align="right"
+        >
+          <template #default="{ row }">
+            <div class="flex items-center justify-end gap-2">
+              <el-button type="primary" link @click="handleColumnManage(row)">
+                {{ t("tableInfo.columnSettings") }}
+              </el-button>
+
+              <el-button link type="primary" @click="handleConfigMetadata(row)">
+                {{ t("common.edit") }}
+              </el-button>
+
+              <el-dropdown trigger="click">
+                <el-button link :icon="MoreFilled" :aria-label="t('common.actions')" />
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="handleSyncColumns(row)">
+                      {{ t("tableInfo.syncColumns") }}
+                    </el-dropdown-item>
+                    <el-dropdown-item @click="handleRemoveTable(row)">
+                      <span class="text-[var(--ep-color-danger)]">{{ t("common.remove") }}</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="t('tableInfo.emptyList')" />
+        </template>
+      </el-table>
+    </DataTableShell>
+
+    <!-- 元数据配置弹窗 -->
+    <el-dialog
+      v-model="metadataDialogVisible"
+      :title="t('common.edit')"
+      width="600px"
+    >
+      <el-form v-if="currentTable" :model="currentTable" label-width="120px">
+        <el-form-item :label="t('common.tableName')">
+          <el-input v-model="currentTable.name" disabled />
+        </el-form-item>
+        <el-form-item :label="t('common.aliases')">
+          <div class="flex gap-2 flex-wrap">
+            <el-tag
+              v-for="alias in currentTable.aliases"
+              :key="alias"
+              closable
+              :disable-transitions="false"
+              @close="removeAlias(alias)"
+            >
+              {{ alias }}
+            </el-tag>
+            <el-input
+              v-if="newAliasInputVisible"
+              ref="newAliasInputRef"
+              v-model="newAlias"
+              class="w-20"
+              size="small"
+              @keyup.enter="handleNewAliasConfirm"
+              @blur="handleNewAliasConfirm"
+            />
+            <el-button v-else size="small" @click="showNewAliasInput">
+              + {{ t('common.aliases') }}
+            </el-button>
+          </div>
+        </el-form-item>
+        <el-form-item :label="t('common.description')">
+          <el-input
+            v-model="currentTable.description"
+            :placeholder="t('common.placeholder.description')"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="metadataDialogVisible = false">
+          {{ t("common.cancel") }}
+        </el-button>
+        <el-button type="primary" @click="handleSaveMetadata">
+          {{ t("common.save") }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 添加表弹窗 -->
+    <el-dialog
+      v-model="addTableDialogVisible"
+      :title="t('tableInfo.addTable')"
+      width="700px"
+      destroy-on-close
+    >
+      <el-form label-width="100px">
+        <el-form-item :label="t('common.schema')" required>
+          <el-select
+            v-model="selectedSchema"
+            :placeholder="t('tableInfo.selectSchema')"
+            :loading="schemaLoading"
+            @change="handleSchemaChange"
+          >
+            <el-option
+              v-for="schema in schemas"
+              :key="schema"
+              :label="schema"
+              :value="schema"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item v-if="selectedSchema" v-loading="tablesLoading">
+          <el-transfer
+            v-model="selectedTables"
+            :data="transferData"
+            filterable
+            :filter-method="filterTableMethod"
+            :filter-placeholder="t('tableInfo.searchPlaceholder')"
+            :titles="[t('tableInfo.availableTables'), t('tableInfo.selectedTables')]"
+            :button-texts="['', '']"
+          >
+            <template #default="{ option }">
+              <el-tooltip
+                placement="top"
+                :show-after="200"
+                :enterable="false"
+              >
+                <template #content>
+                  <div class="font-mono text-xs">{{ option.label }}</div>
+                  <div v-if="option.comment" class="text-xs text-[var(--ep-text-color-secondary)] opacity-85 mt-0.5 max-w-xs break-words">
+                    {{ option.comment }}
+                  </div>
+                </template>
+                <span class="truncate block">{{ option.label }}</span>
+              </el-tooltip>
+            </template>
+            <template #left-empty>
+              <span>{{ t('tableInfo.emptyList') }}</span>
+            </template>
+            <template #right-empty>
+              <span>{{ t('tableInfo.emptySelected') }}</span>
+            </template>
+          </el-transfer>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="addTableDialogVisible = false">
+          {{ t("common.cancel") }}
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="addTableLoading"
+          :disabled="selectedTables.length === 0"
+          @click="handleBatchAdd"
+        >
+          {{ t("tableInfo.addSelected") }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 同步列弹窗 -->
+    <el-dialog
+      v-model="syncDialogVisible"
+      :title="t('tableInfo.syncColumns')"
+      width="35%"
+    >
+      <p class="mb-4">{{ t("tableInfo.syncColumnsConfirm") }}</p>
+      <el-checkbox v-model="syncDialogOverwrite">
+        {{ t("tableInfo.syncColumnsOverwrite") }}
+      </el-checkbox>
+      <template #footer>
+        <el-button @click="syncDialogVisible = false">
+          {{ t("common.cancel") }}
+        </el-button>
+        <el-button type="primary" @click="confirmSyncColumns">
+          {{ t("common.confirmSync") }}
+        </el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>

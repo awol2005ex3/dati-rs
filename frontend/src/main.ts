@@ -1,0 +1,55 @@
+import { routes } from 'vue-router/auto-routes'
+import App from './App.vue'
+
+import '~/styles/index.scss'
+import '~/styles/tailwind.css'
+import '~/utils/codemirror/editor-theme.css'
+
+import { i18n, setupI18n } from "./plugins/i18n"
+
+// If you want to use ElMessage, import it.
+import 'element-plus/theme-chalk/src/message.scss'
+import 'element-plus/theme-chalk/src/message-box.scss'
+
+// if you do not need ssg:
+import { createApp } from "vue";
+import { createRouter, createWebHistory } from "vue-router";
+import { pinia } from "./stores";
+import { useAuthStore } from "~/stores/auth";
+
+const app = createApp(App);
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes,
+})
+
+const publicPaths = ["/login", "/register"];
+
+router.beforeEach((to) => {
+  const authStore = useAuthStore();
+
+  if (authStore.isLoggedIn && publicPaths.includes(to.path)) {
+    return "/";
+  }
+
+  if (!authStore.isLoggedIn && !publicPaths.includes(to.path)) {
+    return "/login";
+  }
+
+  return true;
+});
+
+app.use(pinia)
+app.use(router)
+app.use(i18n)
+
+await setupI18n()
+
+console.log(
+  `%c DatI %c v${__APP_VERSION__} `,
+  "padding: 2px 4px; border-radius: 3px 0 0 3px; color: #fff; background: #3b82f6; font-weight: bold;",
+  "padding: 2px 4px; border-radius: 0 3px 3px 0; color: #fff; background: #10b981; font-weight: bold;"
+);
+
+app.mount("#app");

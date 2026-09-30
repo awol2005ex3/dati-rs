@@ -1,0 +1,144 @@
+import type { BaseResourceVO, IdResponse, PageResponse } from "~/api/types.ts";
+import { del, get, post, put } from "./http";
+
+export interface McpServiceVO extends BaseResourceVO {
+  code: string;
+  status: string;
+  endpoint_path: string;
+  tool_count: number;
+  active_version_number?: number;
+}
+
+export interface McpServiceDiffVO {
+  has_changes: boolean;
+  active_version_number?: number;
+  modified_components: string[];
+  basic_info_changed: boolean;
+  data_scope_changed: boolean;
+  tools_changed: boolean;
+  prompts_changed: boolean;
+  added_tools: string[];
+  modified_tools: string[];
+  deleted_tools: string[];
+  added_prompts: string[];
+  modified_prompts: string[];
+  deleted_prompts: string[];
+}
+
+export interface McpServiceSnapshotVO extends BaseResourceVO {
+  service_id: string;
+  version_number: number;
+  release_note?: string;
+}
+
+export interface McpServicePayload {
+  code?: string;
+  name: string;
+  description?: string;
+  data_scopes?: DataScopeItem[];
+}
+
+export function createMcpService(body: McpServicePayload, signal?: AbortSignal): Promise<IdResponse> {
+  return post<IdResponse, McpServicePayload>("/v1/mcp-services", body, signal);
+}
+
+export function updateMcpService(id: string, body: McpServicePayload, signal?: AbortSignal): Promise<IdResponse> {
+  return put<IdResponse, McpServicePayload>(`/v1/mcp-services/${encodeURIComponent(id)}`, body, signal);
+}
+
+export function getMcpService(id: string, signal?: AbortSignal): Promise<McpServiceVO> {
+  return get<McpServiceVO>(`/v1/mcp-services/${encodeURIComponent(id)}`, undefined, signal);
+}
+
+export function listMcpServices(
+  page: number,
+  size: number,
+  keyword?: string,
+  status?: string,
+  signal?: AbortSignal,
+): Promise<PageResponse<McpServiceVO>> {
+  return get<PageResponse<McpServiceVO>>("/v1/mcp-services", { page, size, keyword, status }, signal);
+}
+
+export interface DataScopeItem {
+  id?: string;
+  scope_type: "DATA_SOURCE" | "SUBJECT";
+  reference_id: string;
+  reference_name?: string;
+  table_names?: string[];
+  tables?: Array<{
+    name?: string;
+    table_name?: string;
+    schema?: string;
+  }>;
+}
+
+export interface DataSourceRef {
+  id: string;
+  name: string;
+}
+
+export interface DataScopeResponse {
+  items: DataScopeItem[];
+  resolved_data_sources: DataSourceRef[];
+}
+
+export function getDataScope(id: string, signal?: AbortSignal): Promise<DataScopeResponse> {
+  return get<DataScopeResponse>(`/v1/mcp-services/${encodeURIComponent(id)}/data-scope`, undefined, signal);
+}
+
+export function saveDataScope(
+  id: string,
+  body: { items: DataScopeItem[] },
+  signal?: AbortSignal,
+): Promise<IdResponse> {
+  return put<IdResponse, { items: DataScopeItem[] }>(
+    `/v1/mcp-services/${encodeURIComponent(id)}/data-scope`,
+    body,
+    signal,
+  );
+}
+
+export function deleteMcpService(id: string, signal?: AbortSignal): Promise<IdResponse> {
+  return del<IdResponse>(`/v1/mcp-services/${encodeURIComponent(id)}`, undefined, signal);
+}
+
+export function publishMcpService(
+  id: string,
+  body?: { release_note?: string },
+  signal?: AbortSignal,
+): Promise<IdResponse> {
+  return post<IdResponse, { release_note?: string }>(
+    `/v1/mcp-services/${encodeURIComponent(id)}/publish`,
+    body || {},
+    signal,
+  );
+}
+
+export function disableMcpService(id: string, signal?: AbortSignal): Promise<IdResponse> {
+  return post<IdResponse, void>(`/v1/mcp-services/${encodeURIComponent(id)}/disable`, undefined, signal);
+}
+
+export function enableMcpService(id: string, signal?: AbortSignal): Promise<IdResponse> {
+  return post<IdResponse, void>(`/v1/mcp-services/${encodeURIComponent(id)}/enable`, undefined, signal);
+}
+
+export function getMcpServiceDiff(id: string, signal?: AbortSignal): Promise<McpServiceDiffVO> {
+  return get<McpServiceDiffVO>(`/v1/mcp-services/${encodeURIComponent(id)}/diff`, undefined, signal);
+}
+
+export function getMcpServiceSnapshots(id: string, signal?: AbortSignal): Promise<McpServiceSnapshotVO[]> {
+  return get<McpServiceSnapshotVO[]>(`/v1/mcp-services/${encodeURIComponent(id)}/snapshots`, undefined, signal);
+}
+
+export function rollbackMcpService(
+  id: string,
+  body: { target_version_number: number; release_note?: string },
+  signal?: AbortSignal,
+): Promise<IdResponse> {
+  return post<IdResponse, { target_version_number: number; release_note?: string }>(
+    `/v1/mcp-services/${encodeURIComponent(id)}/rollback`,
+    body,
+    signal,
+  );
+}

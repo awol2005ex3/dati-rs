@@ -1,0 +1,106 @@
+/* frontend/src/utils/codemirror/editor-theme.css */
+/* ── Wrapper constrains width for .cm-editor ── */
+.cm-editor-wrapper {
+  width: 100%;
+}
+
+/* ── Base appearance, mapped to Element Plus CSS variables ── */
+.cm-editor {
+  background-color: var(--ep-bg-color);
+  color: var(--ep-text-color-primary);
+  font-size: 14px;
+  border: 1px solid var(--ep-border-color);
+  border-radius: var(--ep-border-radius-base);
+  min-height: 120px;
+  cursor: text;
+}
+
+.cm-editor .cm-scroller {
+  min-height: inherit;
+}
+
+.cm-editor.cm-focused {
+  border-color: var(--ep-color-primary);
+  box-shadow: 0 0 0 1px var(--ep-color-primary);
+  outline: none;
+}
+
+/* ── Placeholder: hide on focus like native textarea ── */
+.cm-editor.cm-focused .cm-placeholder {
+  opacity: 0;
+}
+
+/* ── Active line ── */
+.cm-editor .cm-activeLine,
+.cm-editor .cm-activeLineGutter {
+  background-color: var(--ep-color-primary-light-9);
+}
+
+/* ── Cursor ── */
+.cm-editor .cm-cursor {
+  border-left-color: var(--ep-text-color-primary);
+}
+
+/* ── Selection ── */
+.cm-editor .cm-selectionBackground {
+  background-color: var(--ep-color-primary-light-5) !important;
+}
+
+/* ── Template syntax colors ──
+   !important ensures template highlighting always wins over host-language
+   (SQL) tokens, regardless of which decoration ends up as the inner span.
+   * child selector covers the case where a SQL token span is nested inside
+   a template span, forcing the child to adopt template color.
+   SQL token colors are defined in sql-highlight.ts via HighlightStyle,
+   NOT in this file — hence !important here is one-directional (not a race). */
+.cm-editor .cm-tpl-var,
+.cm-editor .cm-tpl-var * {
+  color: #1677ff !important;
+  font-weight: 600 !important;
+}
+
+.cm-editor .cm-tpl-raw-var,
+.cm-editor .cm-tpl-raw-var * {
+  color: #d48806 !important;
+  font-weight: 600 !important;
+}
+
+.cm-editor .cm-tpl-keyword,
+.cm-editor .cm-tpl-keyword * {
+  color: #389e0d !important;
+  font-weight: 600 !important;
+}
+
+/* ── Escape: \{{ → grey, treated as literal text ── */
+.cm-editor .cm-tpl-escape,
+.cm-editor .cm-tpl-escape * {
+  color: var(--ep-text-color-placeholder) !important;
+  font-weight: 400 !important;
+  text-decoration: none !important;
+}
+
+/* ── Fullscreen overlay ── */
+.cm-editor-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: var(--ep-bg-color);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+}
+.cm-editor-fullscreen .cm-editor-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.cm-editor-fullscreen .cm-editor-wrapper .cm-editor {
+  height: 100%;
+}
+
+/* ── Error: unclosed {{ → orange wavy underline ── */
+.cm-editor .cm-tpl-error,
+.cm-editor .cm-tpl-error * {
+  text-decoration: underline wavy #d48806 !important;
+  text-decoration-skip-ink: none;
+}

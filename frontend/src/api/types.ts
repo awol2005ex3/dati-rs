@@ -1,0 +1,89 @@
+export interface IdResponse {
+  id: string;
+}
+
+export interface PageResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  size: number;
+  total_pages: number;
+}
+
+
+export interface BaseResourceVO {
+  id: string;
+  name: string;
+  description?: string | null;
+
+  created_by?: string | null;
+  created_at?: string | null; // ISO 8601 datetime string
+  updated_by?: string | null;
+  updated_at?: string | null;
+
+  created_user_name?: string | null;
+  updated_user_name?: string | null;
+}
+
+export interface LoginRequest {
+  type: string;
+  name: string;
+  password: string;
+}
+
+export interface RegisterRequest {
+  name: string;
+  password: string;
+  display_name?: string;
+}
+
+export interface LoginResponse {
+  token: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  display_name?: string;
+}
+
+
+export interface AclEntry {
+  id: string
+  principal_type: string
+  principal_id: string
+  principal_name?: string
+  permission: 'VIEW' | 'EDIT'
+  created_by: string
+}
+
+export interface GrantRequest {
+  principal_type: 'USER' | 'GROUP'
+  principal_id: string
+  permission: 'VIEW' | 'EDIT'
+}
+
+export interface UserBrief {
+  id: string
+  name: string
+  display_name?: string
+}
+
+// API key (GET /v1/auth/api-keys list item)
+export interface ApiKey {
+  id: string;
+  name: string;
+  key_mask: string;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+}
+
+// POST /v1/auth/api-keys response (plaintext returned once)
+export interface ApiKeyCreated {
+  id: string;
+  name: string;
+  key: string;
+  key_mask: string;
+  expires_at: string | null;
+}

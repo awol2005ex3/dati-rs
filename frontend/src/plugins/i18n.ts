@@ -1,0 +1,60 @@
+import { createI18n } from "vue-i18n"
+import zh from "../locales/zh"
+import en from "../locales/en"
+
+export type AppLang = "en" | "zh"
+
+// 组合所有语言的类型，确保任何一个语言包中定义的键都能在类型提示中找到
+type MessageSchema = typeof zh & typeof en
+
+declare module "vue-i18n" {
+  export interface DefineLocaleMessage extends MessageSchema {}
+}
+
+function getDefaultLang(): AppLang {
+  // 1. 优先使用用户手动设置的语言
+  if (typeof localStorage !== 'undefined') {
+    const savedLang = localStorage.getItem("locale") as AppLang
+    if (savedLang) return savedLang
+  }
+
+  // 2. 检测浏览器语言
+  if (typeof navigator !== 'undefined') {
+    const browserLang = navigator.language.toLowerCase()
+    if (browserLang.startsWith('zh')) return 'zh'
+  }
+
+  // 3. 默认英文
+  return 'en'
+}
+
+const defaultLang: AppLang = getDefaultLang()
+
+export const i18n = createI18n({
+  legacy: false,
+  locale: defaultLang,
+  messages: {}, // 先空，配合异步加载
+})
+
+const loaders: Record<AppLang, () => Promise<any>> = {
+  en: () => import("../locales/en"),
+  zh: () => import("../locales/zh"),
+}
+
+export async function setI18nLanguage(lang: AppLang) {
+  if (!i18n.global.availableLocales.includes(lang)) {
+    const mod = await loaders[lang]()
+    i18n.global.setLocaleMessage(lang, mod.default || mod)
+  }
+  i18n.global.locale.value = lang
+  if (typeof document !== 'undefined') {
+    document.querySelector("html")?.setAttribute("lang", lang)
+  }
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem("locale", lang)
+  }
+}
+
+export async function setupI18n() {
+  await setI18nLanguage(defaultLang)
+}

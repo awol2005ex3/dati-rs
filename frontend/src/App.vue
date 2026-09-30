@@ -1,0 +1,66 @@
+<script setup lang="ts">
+import { computed, watch } from "vue";
+import { useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
+import BaseHeader from "~/components/layouts/BaseHeader.vue";
+import BaseSide from "~/components/layouts/BaseSide.vue";
+import { useSystemStore } from "~/stores/system";
+import { useAuthStore } from "~/stores/auth";
+
+const systemStore = useSystemStore();
+const authStore = useAuthStore();
+const route = useRoute();
+const { t } = useI18n();
+
+const isAuthPage = computed(() => ["/login", "/register"].includes(route.path));
+const isHomePage = computed(() => route.path === "/");
+
+watch(
+  () => authStore.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) {
+      systemStore.loadConfig();
+      authStore.fetchUser();
+    }
+  },
+  { immediate: true },
+);
+</script>
+
+<template>
+  <el-config-provider namespace="ep">
+    <a href="#main-content" class="skip-link">{{ t('common.skipToContent') }}</a>
+    <template v-if="isAuthPage">
+      <RouterView />
+    </template>
+    <template v-else>
+      <BaseHeader />
+      <template v-if="isHomePage">
+        <div class="home-container bg-[var(--ep-bg-color)] overflow-y-auto">
+          <RouterView id="main-content" tabindex="-1" />
+        </div>
+      </template>
+      <template v-else>
+        <div class="main-container flex overflow-hidden">
+          <BaseSide class="shrink-0" />
+          <div class="flex-1 min-w-0 bg-[var(--ep-fill-color-light)] flex flex-col min-h-0 overflow-hidden">
+            <div class="m-4 p-2 bg-[var(--ep-bg-color)] flex-1 min-h-0 flex flex-col overflow-hidden">
+              <RouterView id="main-content" tabindex="-1" class="flex-1 min-h-0 flex flex-col" />
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
+  </el-config-provider>
+</template>
+
+<style>
+.main-container {
+  height: calc(100vh - var(--ep-menu-item-height) - 4px);
+  overflow: hidden;
+}
+
+.home-container {
+  height: calc(100vh - var(--ep-menu-item-height) - 4px);
+}
+</style>

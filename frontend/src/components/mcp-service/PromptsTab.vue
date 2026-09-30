@@ -1,0 +1,31 @@
+<script setup lang="ts">
+import { ref, onMounted } from "vue";
+import type { McpPromptVO } from "~/api/mcp-prompt";
+import { listPrompts } from "~/api/mcp-prompt";
+import PromptList from "./PromptList.vue";
+
+const props = defineProps<{ serviceId: string }>();
+const emit = defineEmits<{ (e: "refresh"): void }>();
+
+const loading = ref(false);
+const prompts = ref<McpPromptVO[]>([]);
+
+const loadPrompts = async () => {
+  try { loading.value = true; prompts.value = await listPrompts(props.serviceId); }
+  finally { loading.value = false; }
+};
+
+const handleListRefresh = async () => {
+  await loadPrompts();
+  emit("refresh");
+};
+
+defineExpose({ loadPrompts });
+onMounted(loadPrompts);
+</script>
+
+<template>
+  <div v-loading="loading" class="flex flex-col gap-4">
+    <PromptList :prompts="prompts" :service-id="props.serviceId" @refresh="handleListRefresh" />
+  </div>
+</template>

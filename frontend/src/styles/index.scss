@@ -1,0 +1,156 @@
+// import dark theme
+@use 'element-plus/theme-chalk/src/dark/css-vars.scss' as *;
+
+// :root {
+//   --ep-color-primary: red;
+// }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  z-index: 9999;
+  padding: 8px 16px;
+  background: var(--ep-color-primary);
+  color: #fff;
+  text-decoration: none;
+  font-size: 14px;
+  outline: none;
+
+  &:focus {
+    top: 0;
+  }
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+
+a {
+  color: var(--ep-color-primary);
+}
+
+code {
+  border-radius: 2px;
+  padding: 2px 4px;
+  background-color: var(--ep-color-primary-light-9);
+  color: var(--ep-color-primary);
+}
+
+// 统一表格基础样式
+.el-table {
+  .el-table__cell {
+    padding: 12px 0;
+  }
+
+  .el-table__row {
+    .el-button--link {
+      opacity: 0.85;
+    }
+    &:hover .el-button--link {
+      opacity: 1;
+    }
+  }
+}
+
+/* ============ Page Layout ============ */
+.list-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ============ Page Heading ============ */
+.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-heading h1 {
+  margin: 0;
+  color: var(--ep-text-color-primary);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 28px;
+}
+
+.page-heading p {
+  margin: 4px 0 0;
+  color: var(--ep-text-color-secondary);
+  font-size: 13px;
+}
+
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ============ Toolbar ============ */
+.toolbar {
+  border: 1px solid var(--ep-border-color-lighter);
+  border-radius: 8px;
+  background: var(--ep-bg-color);
+  padding: 14px;
+}
+
+.toolbar--compact {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.toolbar-fields {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-search {
+  width: min(420px, 100%) !important;
+}
+
+/* ============ Responsive ============ */
+@media (max-width: 768px) {
+  .list-page {
+    padding: 16px;
+  }
+
+  .page-heading,
+  .heading-actions,
+  .detail-header,
+  .detail-actions,
+  .toolbar-fields {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .toolbar-search,
+  .toolbar-status {
+    width: 100%;
+  }
+}

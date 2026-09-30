@@ -1,0 +1,81 @@
+import type { BaseResourceVO, IdResponse, PageResponse } from "~/api/types.ts";
+import { get, post, put, del } from "./http";
+
+
+// 兼容 DataSource：创建/编辑时我们直接发 JSON
+export interface DatasourceVO extends BaseResourceVO {
+  connection_url: string;
+  username: string;
+  type: string;
+  default_schema?: string;
+}
+
+// 创建/更新的请求体（蛇形命名）
+export interface DataSourcePayload {
+  name?: string;
+  description?: string;
+  connection_url: string;
+  username: string;
+  password?: string;
+  type: string;
+}
+
+// 表信息
+export interface TableVO {
+  name: string;
+  comment?: string;
+}
+
+// 数据源：测试连接（POST /v1/data-sources/test-connection）
+// 请求体字段用蛇形（如 connection_url、username、password、type）；连接成功返回 true，
+// 失败时后端以 DS001/DS003 返回驱动给出的原因，Promise 会 reject（用 notifyError 展示）
+export function testConnection(body: DataSourcePayload, signal?: AbortSignal): Promise<boolean> {
+  return post<boolean, DataSourcePayload>('/v1/data-sources/test-connection', body, signal)
+}
+
+// 数据源：新增（POST /v1/data-sources）
+export function addDataSource(body: DataSourcePayload, signal?: AbortSignal): Promise<IdResponse> {
+  return post<IdResponse, DataSourcePayload>('/v1/data-sources', body, signal)
+}
+
+// 数据源：更新（PUT /v1/data-sources/{id}）
+export function updateDataSource(id: string, body: DataSourcePayload, signal?: AbortSignal): Promise<IdResponse> {
+  return put<IdResponse, DataSourcePayload>(`/v1/data-sources/${encodeURIComponent(id)}`, body, signal)
+}
+
+// 数据源：删除（DELETE /v1/data-sources/{id}）
+export function deleteDataSource(id: string, signal?: AbortSignal): Promise<IdResponse> {
+  return del<IdResponse>(`/v1/data-sources/${encodeURIComponent(id)}`, undefined, signal)
+}
+
+// 数据源：列表（GET /v1/data-sources）
+export function listDataSources(page: number, size: number, keyword?: string, signal?: AbortSignal): Promise<PageResponse<DatasourceVO>> {
+  return get<PageResponse<DatasourceVO>>(
+    "/v1/data-sources",
+    { page, size, keyword },
+    signal,
+  );
+}
+
+// 数据源：详情（GET /v1/data-sources/{id}）
+export function getDataSource(id: string, signal?: AbortSignal): Promise<DatasourceVO> {
+  return get<DatasourceVO>(`/v1/data-sources/${encodeURIComponent(id)}`, undefined, signal)
+}
+
+// Schema 列表（GET /v1/data-sources/{id}/schemas）
+export function getSchemas(id: string, signal?: AbortSignal): Promise<string[]> {
+  return get<string[]>(`/v1/data-sources/${encodeURIComponent(id)}/schemas`, undefined, signal)
+}
+
+// 表列表（GET /v1/data-sources/{id}/schemas/{schema}/tables）
+export function getTables(
+  id: string,
+  schema: string,
+  signal?: AbortSignal
+): Promise<TableVO[]> {
+  return get<TableVO[]>(
+    `/v1/data-sources/${encodeURIComponent(id)}/schemas/${encodeURIComponent(schema)}/tables`,
+    undefined,
+    signal
+  )
+}

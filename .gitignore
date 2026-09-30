@@ -1,0 +1,16 @@
+/target
+.opencode
+.trae
+.workbuddy
+.agents
+PLAN.md
+
+# Frontend: dependencies and generated artifacts, rebuilt by `pnpm run build:all`
+frontend/node_modules
+frontend/dist
+frontend/public/docs
+docs/user-guide/.vitepress/cache
+docs/user-guide/.vitepress/.temp
+docs/user-guide/.vitepress/dist
+node_modules
+db
