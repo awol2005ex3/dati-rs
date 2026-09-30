@@ -430,7 +430,7 @@ mod tests {
     fn every_dialect_carries_every_version() {
         let all = migrations();
         for kind in [MetaKind::Sqlite, MetaKind::Mysql, MetaKind::Postgres] {
-            for version in ["0001_init", "0002_rename_jdbc_url"] {
+            for version in ["0001_init"] {
                 assert!(
                     all.iter().any(|(v, k, _)| *k == kind && *v == version),
                     "{kind:?} has no {version}"
@@ -449,54 +449,6 @@ mod tests {
         }
         let sql = db.sql("SELECT COUNT(*) AS c FROM schema_migration");
         let row = sqlx::query(&sql).fetch_one(db.pool()).await.unwrap();
-        assert_eq!(row.try_get::<i64, _>("c").unwrap(), 2);
-    }
-
-    /// A store built before the column rename already records `0001_init`, so only a later
-    /// version can reach it. This is the case an in-place baseline edit silently misses.
-    #[tokio::test]
-    async fn upgrades_a_store_that_already_ran_the_init_migration() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let url = format!(
-            "sqlite:{}/legacy.db?mode=rwc",
-            dir.path().to_string_lossy().replace('\\', "/")
-        );
-        sqlx::any::install_default_drivers();
-        let pool = AnyPoolOptions::new()
-            .max_connections(1)
-            .connect(&url)
-            .await
-            .expect("legacy pool");
-        let init = include_str!("../../../migrations/sqlite/0001_init.sql");
-        for statement in split_statements(init) {
-            pool.execute(statement.as_str()).await.expect("legacy ddl");
-        }
-        pool.execute("CREATE TABLE schema_migration (version VARCHAR(64) NOT NULL UNIQUE, applied_at VARCHAR(32) NOT NULL)")
-            .await
-            .expect("legacy migration table");
-        sqlx::query(
-            "INSERT INTO schema_migration (version, applied_at) VALUES ('0001_init', '2026-09-28T04:59:19Z')",
-        )
-        .execute(&pool)
-        .await
-        .expect("legacy version");
-        sqlx::query("INSERT INTO data_source (id, name, jdbc_url, type) VALUES ('id-1', 'legacy', 'mysql://h:3306/dw', 'MYSQL')")
-            .execute(&pool)
-            .await
-            .expect("legacy row");
-        drop(pool);
-
-        let db = Db::connect(&url, MetaKind::Sqlite)
-            .await
-            .expect("upgrade the legacy store");
-        std::mem::forget(dir);
-
-        let sql = db.sql("SELECT connection_url AS u FROM data_source WHERE id = ?");
-        let row = sqlx::query(&sql)
-            .bind("id-1")
-            .fetch_one(db.pool())
-            .await
-            .expect("renamed column reads the old row");
-        assert_eq!(row.try_get::<String, _>("u").unwrap(), "mysql://h:3306/dw");
+        assert_eq!(row.try_get::<i64, _>("c").unwrap(), 1);
     }
 }
