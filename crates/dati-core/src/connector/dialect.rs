@@ -229,28 +229,38 @@ pub fn tables_sql(family: Family) -> &'static str {
     }
 }
 
-/// `name, type, comment` for the columns of one table, in declaration order.
-pub fn columns_sql(family: Family) -> &'static str {
+/// `table, name, type, comment` for the columns of several tables of one schema, in one statement.
+///
+/// Registering the tables the picker selected needs their columns, and a remote engine answers a
+/// metadata query slowly enough that one per table runs past the console's own timeout. Every family
+/// therefore reports the same four columns, in the same order, so the reader has one row shape: a
+/// SQLite source reads the same metadata through its `pragma_table_info` table-valued function.
+pub fn columns_batch_sql(family: Family, tables: usize) -> String {
+    let list = placeholder_list(tables);
     match family {
-        // MySQL reports TYPE_NAME without a length through JDBC, so the sql type name is upper-cased.
-        Family::MySql => {
-            "SELECT column_name, UPPER(data_type), column_comment FROM information_schema.columns \
-             WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position"
-        }
-        Family::Postgres => {
-            "SELECT a.attname, t.typname, COALESCE(col_description(a.attrelid, a.attnum), '') \
-             FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid \
-             JOIN pg_namespace n ON n.oid = c.relnamespace JOIN pg_type t ON t.oid = a.atttypid \
-             WHERE n.nspname = ? AND c.relname = ? AND a.attnum > 0 AND NOT a.attisdropped \
-             ORDER BY a.attnum"
-        }
-        // PRAGMA cannot bind parameters; the caller interpolates a quoted identifier.
-        Family::Sqlite => "PRAGMA table_info(",
+        Family::MySql => format!(
+            "SELECT table_name, column_name, UPPER(data_type), column_comment \
+             FROM information_schema.columns WHERE table_schema = ? AND table_name IN ({list}) \
+             ORDER BY table_name, ordinal_position"
+        ),
+        Family::Postgres => format!(
+            "SELECT c.relname, a.attname, t.typname, COALESCE(col_description(a.attrelid, a.attnum), '') \
+             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+             JOIN pg_attribute a ON a.attrelid = c.oid JOIN pg_type t ON t.oid = a.atttypid \
+             WHERE n.nspname = ? AND c.relname IN ({list}) AND a.attnum > 0 AND NOT a.attisdropped \
+             ORDER BY c.relname, a.attnum"
+        ),
+        // The type keeps the case it was declared with, the way `PRAGMA table_info` reported it.
+        Family::Sqlite => format!(
+            "SELECT m.name, p.name, p.type, '' FROM sqlite_master m, pragma_table_info(m.name) p \
+             WHERE m.type = 'table' AND m.name IN ({list}) ORDER BY m.name, p.cid"
+        ),
     }
 }
 
-pub fn sqlite_pragma_columns(table: &str) -> String {
-    format!("PRAGMA table_info({})", Family::Sqlite.quote(table))
+/// `?, ?, ?` for an `IN` list of `count` values.
+fn placeholder_list(count: usize) -> String {
+    (0..count).map(|_| "?").collect::<Vec<_>>().join(", ")
 }
 
 /// The distinct-value sampling behind column value extraction.
@@ -456,20 +466,37 @@ mod tests {
             distinct_values_sql(Family::Sqlite, Some("main"), "orders", "status", 0),
             "SELECT DISTINCT CAST(\"status\" AS TEXT) FROM \"orders\" WHERE \"status\" IS NOT NULL LIMIT 1"
         );
-        assert_eq!(
-            sqlite_pragma_columns("or\"ders"),
-            "PRAGMA table_info(\"or\"\"ders\")"
-        );
     }
 
     #[test]
     fn every_family_has_metadata_queries() {
         for f in [Family::MySql, Family::Postgres, Family::Sqlite] {
             assert!(!tables_sql(f).is_empty());
-            assert!(!columns_sql(f).is_empty());
+            assert!(!columns_batch_sql(f, 1).is_empty());
             assert!(!schemas_sql(f).is_empty());
         }
         assert!(schemas_skip_temp(Family::Sqlite));
         assert!(!schemas_skip_temp(Family::MySql));
+    }
+
+    /// The batched column read answers with four columns in every family, takes one placeholder per
+    /// table name, and binds a schema only where there is one to bind.
+    #[test]
+    fn the_batched_column_read_binds_the_schema_then_the_table_names() {
+        assert_eq!(
+            columns_batch_sql(Family::MySql, 2),
+            "SELECT table_name, column_name, UPPER(data_type), column_comment \
+             FROM information_schema.columns WHERE table_schema = ? AND table_name IN (?, ?) \
+             ORDER BY table_name, ordinal_position"
+        );
+        // A SQLite source has one attached schema, so its statement carries no schema placeholder.
+        let sqlite = columns_batch_sql(Family::Sqlite, 1);
+        assert!(
+            sqlite.contains("pragma_table_info(m.name)"),
+            "PRAGMA has no table to join: {sqlite}"
+        );
+        assert!(sqlite.contains("IN (?)"), "{sqlite}");
+        assert!(!sqlite.contains("table_schema"), "{sqlite}");
+        assert!(columns_batch_sql(Family::Postgres, 3).contains("IN (?, ?, ?)"));
     }
 }

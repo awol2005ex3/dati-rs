@@ -685,6 +685,28 @@ async fn live_metadata_flows_into_the_registered_tables() {
             .all(|(_, row)| row["extract_value_enabled"] == json!(false))
     );
 
+    // One statement read both tables, and each kept its own columns.
+    let customers_id = row(&tables, "customers")["id"]
+        .as_str()
+        .expect("table id")
+        .to_string();
+    let columns = call(
+        &app.router,
+        Method::GET,
+        &format!("/v1/data-sources/{id}/tables/{customers_id}/columns?size=100"),
+        None,
+        Some(&token),
+    )
+    .await
+    .expect(StatusCode::OK);
+    let columns = rows_by_name(&columns);
+    let mut summary: Vec<(&str, &str)> = columns
+        .iter()
+        .map(|(name, row)| (name.as_str(), row["column_type"].as_str().expect("type")))
+        .collect();
+    summary.sort();
+    assert_eq!(summary, vec![("id", "INTEGER"), ("name", "TEXT")]);
+
     // Editing is unconditional for description and aliases: omitting them clears them again.
     let body = json!({ "description": "销售订单", "aliases": ["订单", "orders"] });
     let reply = call(

@@ -426,13 +426,18 @@ mod tests {
         }
     }
 
+    /// A version that exists for one dialect only would leave the other two stores behind forever,
+    /// so the sets have to stay equal.
     #[test]
     fn every_dialect_carries_every_version() {
         let all = migrations();
+        let mut versions: Vec<&str> = all.iter().map(|(version, _, _)| *version).collect();
+        versions.sort_unstable();
+        versions.dedup();
         for kind in [MetaKind::Sqlite, MetaKind::Mysql, MetaKind::Postgres] {
-            for version in ["0001_init"] {
+            for version in &versions {
                 assert!(
-                    all.iter().any(|(v, k, _)| *k == kind && *v == version),
+                    all.iter().any(|(v, k, _)| *k == kind && v == version),
                     "{kind:?} has no {version}"
                 );
             }

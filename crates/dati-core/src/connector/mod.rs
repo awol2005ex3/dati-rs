@@ -20,9 +20,7 @@ use crate::model::datasource::{ConnectionSpec, DbType, LiveColumn, LiveTable};
 use live::Live;
 
 pub use dialect::Family;
-pub use dialect::{
-    columns_sql, connection_url, family, infer_db_type, sqlite_pragma_columns, tables_sql,
-};
+pub use dialect::{connection_url, family, infer_db_type, tables_sql};
 
 /// Connection failures surface as `DS001`, everything raised while a statement runs as `DS003`,
 /// which is how the Java controllers split the `SQLException` cases.
@@ -218,41 +216,58 @@ impl Connectors {
             .collect())
     }
 
+    /// The columns of one live table.
     pub async fn list_columns(
         &self,
         spec: &ConnectionSpec,
         schema: &str,
         table: &str,
     ) -> std::result::Result<Vec<LiveColumn>, ConnectError> {
+        let mut found = self
+            .list_columns_batch(spec, schema, std::slice::from_ref(&table.to_string()))
+            .await?;
+        Ok(found.remove(table).unwrap_or_default())
+    }
+
+    /// The columns of several tables of one schema, read with a single statement and keyed by table
+    /// name. A name the source does not have is absent from the map, which is also what a table
+    /// without columns looks like; the caller checks existence against [`Self::list_tables`] anyway.
+    ///
+    /// This is why the read is a batch: registering the tables the picker selected asked for their
+    /// columns one table at a time, and a remote engine answers a metadata statement slowly enough
+    /// that a selection of them runs past the console's own timeout.
+    pub async fn list_columns_batch(
+        &self,
+        spec: &ConnectionSpec,
+        schema: &str,
+        tables: &[String],
+    ) -> std::result::Result<HashMap<String, Vec<LiveColumn>>, ConnectError> {
+        if tables.is_empty() {
+            return Ok(HashMap::new());
+        }
         let family = family(spec.db_type);
         let pool = self.pool(spec).await?;
-        // `PRAGMA` takes no parameter, so the table name is quoted into the statement instead.
-        let (sql, binds): (String, Vec<Value>) = match family {
-            Family::Sqlite => (dialect::sqlite_pragma_columns(table), Vec::new()),
-            _ => (
-                dialect::columns_sql(family).to_string(),
-                vec![json!(schema), json!(table)],
-            ),
+        // SQLite has one attached schema, so its statement binds no schema at all.
+        let mut binds: Vec<Value> = match family {
+            Family::Sqlite => Vec::new(),
+            _ => vec![json!(schema)],
         };
+        binds.extend(tables.iter().map(|table| json!(table.as_str())));
+        let sql = dialect::columns_batch_sql(family, tables.len());
         let rows = pool.select(&sql, &binds, usize::MAX).await?;
-        // PRAGMA table_info is (cid, name, type, notnull, dflt_value, pk); the metadata queries
-        // return (name, type, comment) in that order.
-        let (name_at, type_at, comment_at) = match family {
-            Family::Sqlite => (1, 2, None),
-            _ => (0, 1, Some(2)),
-        };
-        Ok(rows
-            .iter()
-            .filter_map(|row| {
-                Some(LiveColumn {
-                    name: row.text(name_at)?,
-                    type_name: row.text(type_at).unwrap_or_default(),
-                    comment: comment_at
-                        .and_then(|at| row.text(at))
-                        .filter(|value| !value.is_empty()),
-                })
-            })
-            .collect())
+        let mut found: HashMap<String, Vec<LiveColumn>> = HashMap::new();
+        for row in rows {
+            // (table, name, type, comment) for every family, the order columns_batch_sql promises.
+            let (Some(table), Some(name)) = (row.text(0), row.text(1)) else {
+                continue;
+            };
+            found.entry(table).or_default().push(LiveColumn {
+                name,
+                type_name: row.text(2).unwrap_or_default(),
+                comment: row.text(3).filter(|value| !value.is_empty()),
+            });
+        }
+        Ok(found)
     }
 
     /// Distinct values of one column, the sample the value dictionary is built from.
@@ -481,6 +496,52 @@ mod tests {
         assert_eq!(columns[1].name, "status");
         assert_eq!(columns[1].type_name, "TEXT");
         assert_eq!(columns[0].comment, None);
+    }
+
+    /// A whole selection read with one statement: the map is keyed by table name, keeps the
+    /// declaration order inside each table, and says nothing about a name the source does not have.
+    #[tokio::test]
+    async fn reads_the_columns_of_a_selection_of_tables_together() {
+        let spec = sqlite_spec(&seeded_file().await);
+        let connectors = Connectors::new();
+        let found = connectors
+            .list_columns_batch(
+                &spec,
+                "main",
+                &[
+                    "orders".to_string(),
+                    "counters".to_string(),
+                    "no_such_table".to_string(),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let mut names: Vec<&String> = found.keys().collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["counters", "orders"],
+            "a table the source has no columns for is not invented"
+        );
+        assert_eq!(
+            found["orders"]
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["id", "status", "amount"]
+        );
+        assert_eq!(found["counters"][1].name, "label");
+        assert_eq!(found["counters"][1].type_name, "TEXT");
+        assert!(!found.contains_key("no_such_table"));
+        assert!(
+            connectors
+                .list_columns_batch(&spec, "main", &[])
+                .await
+                .unwrap()
+                .is_empty(),
+            "nothing asked for, nothing read"
+        );
     }
 
     #[tokio::test]

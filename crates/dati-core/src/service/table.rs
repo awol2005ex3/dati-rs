@@ -1,11 +1,13 @@
 //! Tables registered from a data source: the Java `TableService`.
 
+use std::collections::HashMap;
+
 use crate::auth::AuthUser;
 use crate::db::Db;
 use crate::error::{DatiError, ErrorCode, Result};
 use crate::model::base::{Audit, PageReq, PageResponse};
 use crate::model::datasource::{
-    AddTableRequest, ColumnInfo, DataSource, LiveTable, TableInfo, TableInfoView,
+    AddTableRequest, ColumnInfo, DataSource, LiveColumn, LiveTable, TableInfo, TableInfoView,
     TableUpdateRequest,
 };
 use crate::model::permission::Permission;
@@ -130,19 +132,51 @@ impl TableService {
             listed.push((schema, live));
         }
 
+        // The existence check covers the whole selection before anything is written. The Java
+        // import ran inside one transaction, so a name the database did not have took the tables
+        // registered before it down again; without a transaction the check has to come first.
+        for request in requests {
+            let schema = request.schema.clone().unwrap_or_default();
+            let name = request.name.clone().unwrap_or_default();
+            let exists = listed
+                .iter()
+                .find(|(listed_schema, _)| *listed_schema == schema)
+                .is_some_and(|(_, tables)| tables.iter().any(|table| table.name == name));
+            if !exists {
+                return Err(DatiError::new(ErrorCode::DsTableNotFound, [name.as_str()]));
+            }
+        }
+
+        // One live column read per schema too. Asked table by table, a selection of them kept the
+        // console waiting past the timeout it gives itself.
+        let mut columns: Vec<(String, HashMap<String, Vec<LiveColumn>>)> = Vec::new();
+        for (schema, _) in &listed {
+            let names: Vec<String> = requests
+                .iter()
+                .filter(|request| request.schema.clone().unwrap_or_default() == *schema)
+                .map(|request| request.name.clone().unwrap_or_default())
+                .collect();
+            let found = connectors
+                .list_columns_batch(&connection, schema, &names)
+                .await
+                .map_err(|err| {
+                    DatiError::new(
+                        ErrorCode::DsSyncFailed,
+                        [format!("{schema}: {}", err.reason())],
+                    )
+                })?;
+            columns.push((schema.clone(), found));
+        }
+
         let mut ids = Vec::new();
         for request in requests {
             let schema = request.schema.clone().unwrap_or_default();
             let name = request.name.clone().unwrap_or_default();
-            let live = listed
+            let description = listed
                 .iter()
                 .find(|(listed_schema, _)| *listed_schema == schema)
-                .map(|(_, tables)| tables.as_slice())
-                .unwrap_or_default();
-            let Some(live_table) = live.iter().find(|row| row.name == name) else {
-                return Err(DatiError::new(ErrorCode::DsTableNotFound, [name.as_str()]));
-            };
-            let description = live_table.comment.clone();
+                .and_then(|(_, tables)| tables.iter().find(|table| table.name == name))
+                .and_then(|table| table.comment.clone());
 
             let row = TableInfo {
                 id: new_id(),
@@ -157,25 +191,22 @@ impl TableService {
             let table_id = table::insert(&self.db, &row).await?;
             ids.push(table_id.clone());
 
-            let live_columns = connectors
-                .list_columns(&connection, &schema, &name)
-                .await
-                .map_err(|err| {
-                    DatiError::new(
-                        ErrorCode::DsSyncFailed,
-                        [format!("{name}: {}", err.reason())],
-                    )
-                })?;
+            let live_columns = columns
+                .iter()
+                .find(|(listed_schema, _)| *listed_schema == schema)
+                .and_then(|(_, found)| found.get(&name))
+                .into_iter()
+                .flatten();
             for column in live_columns {
                 column::insert(
                     &self.db,
                     &ColumnInfo {
                         id: new_id(),
-                        name: Some(column.name),
-                        description: column.comment.filter(|value| !value.is_empty()),
+                        name: Some(column.name.clone()),
+                        description: column.comment.clone().filter(|value| !value.is_empty()),
                         deleted: false,
                         table_id: table_id.clone(),
-                        column_type: Some(column.type_name),
+                        column_type: Some(column.type_name.clone()),
                         aliases: Vec::new(),
                         extract_value_enabled: false,
                         audit: Audit::new(&caller.id),
